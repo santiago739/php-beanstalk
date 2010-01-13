@@ -12,11 +12,11 @@
   | obtain it through the world-wide-web, please send a note to          |
   | license@php.net so we can mail you a copy immediately.               |
   +----------------------------------------------------------------------+
-  | Author:                                                              |
+  | Author: Alexey Romanenko <santiago739@gmail.com>                     |
   +----------------------------------------------------------------------+
 */
 
-/* $Id: header 252479 2008-02-07 19:39:50Z iliaa $ */
+/* $Id */
 
 #ifndef PHP_BEANSTALK_H
 #define PHP_BEANSTALK_H
@@ -48,6 +48,7 @@ PHP_METHOD(Beanstalk, __construct);
 PHP_METHOD(Beanstalk, connect);
 PHP_METHOD(Beanstalk, close);
 PHP_METHOD(Beanstalk, put);
+PHP_METHOD(Beanstalk, use);
 
 typedef struct _beanstalk_client {
     php_stream     *stream;

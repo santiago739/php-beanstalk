@@ -1,22 +1,22 @@
 /*
   +----------------------------------------------------------------------+
-  | PHP Version 5														|
+  | PHP Version 5                                                        |
   +----------------------------------------------------------------------+
-  | Copyright (c) 1997-2008 The PHP Group								|
+  | Copyright (c) 1997-2008 The PHP Group                                |
   +----------------------------------------------------------------------+
-  | This source file is subject to version 3.01 of the PHP license,	  |
-  | that is bundled with this package in the file LICENSE, and is		|
-  | available through the world-wide-web at the following url:		   |
-  | http://www.php.net/license/3_01.txt								  |
+  | This source file is subject to version 3.01 of the PHP license,      |
+  | that is bundled with this package in the file LICENSE, and is        |
+  | available through the world-wide-web at the following url:           |
+  | http://www.php.net/license/3_01.txt                                  |
   | If you did not receive a copy of the PHP license and are unable to   |
-  | obtain it through the world-wide-web, please send a note to		  |
-  | license@php.net so we can mail you a copy immediately.			   |
+  | obtain it through the world-wide-web, please send a note to          |
+  | license@php.net so we can mail you a copy immediately.               |
   +----------------------------------------------------------------------+
-  | Author:															  |
+  | Author: Alexey Romanenko <santiago739@gmail.com>                     |
   +----------------------------------------------------------------------+
 */
 
-/* $Id: header 252479 2008-02-07 19:39:50Z iliaa $ */
+/* $Id */
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -42,8 +42,11 @@ const zend_function_entry beanstalk_functions[] = {
 	PHP_ME(Beanstalk, connect, NULL, ZEND_ACC_PUBLIC)
 	PHP_ME(Beanstalk, close, NULL, ZEND_ACC_PUBLIC)
 	PHP_ME(Beanstalk, put, NULL, ZEND_ACC_PUBLIC)
+	PHP_ME(Beanstalk, use, NULL, ZEND_ACC_PUBLIC)
 	{NULL, NULL, NULL}	
 };
+
+static int beanstalk_client_disconnect(beanstalk_client *bs_client TSRMLS_DC);
 
 /* {{{ beanstalk_module_entry
  */
@@ -103,7 +106,7 @@ static void _beanstalk_client_free(beanstalk_client *bs_client) /* {{{ */
 static void _beanstalk_client_dtor(zend_rsrc_list_entry *rsrc TSRMLS_DC) /* {{{ */
 {
 	beanstalk_client *bs_client = (beanstalk_client *) rsrc->ptr;
-	//beanstalk_client_disconnect(bs_client TSRMLS_CC);
+	beanstalk_client_disconnect(bs_client TSRMLS_CC);
 	_beanstalk_client_free(bs_client);
 }
 /* }}} */
@@ -492,36 +495,6 @@ PHP_METHOD(Beanstalk, put)
         RETURN_FALSE;
     }
 
-    //cmd_len = beanstalk_cmd_format(&cmd, "put %d %d %d %d\r\n%s\r\n", priority, delay, ttr, val_len, val);
-    
-    //cmd = emalloc(sizeof("put") - 1 + 1);
-    //cmd_len = sprintf(cmd, "put");
-    
-    //~ request = emalloc( 		
-			//~ sizeof("put") - 1 		
-			//~ + 1 /* space */ 		
-			//~ + MAX_LENGTH_OF_LONG 		
-			//~ + 1 /* space */ 		
-			//~ + MAX_LENGTH_OF_LONG 		
-			//~ + 1 /* space */ 		
-			//~ + MAX_LENGTH_OF_LONG 	
-			//~ + 1 /* space */ 		
-			//~ + MAX_LENGTH_OF_LONG 		
-			//~ + sizeof("\r\n") - 1 		
-			//~ + value_len 		
-			//~ + sizeof("\r\n") - 1 		
-			//~ + 1 		
-			//~ ); 	
-	//~ request_len = sprintf(request, "%s %d %d %d %d\r\n", "put", priority, delay, ttr, value_len);	
-	//~ 
-	//~ memcpy(request + request_len, value, value_len); 		
-	//~ request_len += value_len; 		
-//~ 
-	//~ memcpy(request + request_len, "\r\n", sizeof("\r\n") - 1); 		
-	//~ request_len += sizeof("\r\n") - 1; 		
-//~ 
-	//~ request[request_len] = '\0';
-
 	command_len = spprintf(&command, 0, "put %d %d %d %d\r\n%s\r\n", 
 							priority, delay, ttr, value_len, value);
 
@@ -531,6 +504,43 @@ PHP_METHOD(Beanstalk, put)
     }
     efree(command);
     //beanstalk_boolean_response(INTERNAL_FUNCTION_PARAM_PASSTHRU, bs_client);
+    
+    if ((response = beanstalk_client_read(bs_client, &response_len TSRMLS_CC)) == NULL) {
+        RETURN_FALSE;
+    }
+    printf("response: %s \n", response);
+    efree(response);
+    
+    RETURN_TRUE;
+}
+
+/* {{{ proto boolean Beanstalk::put(string key, string value)
+ */
+PHP_METHOD(Beanstalk, use)
+{
+    zval *object;
+    beanstalk_client *bs_client = NULL;
+    char *tube = NULL, *command;
+    int tube_len, command_len;
+    char *response;
+    int response_len;
+
+    if (zend_parse_method_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "Os",
+                                     &object, beanstalk_ce, &tube, &tube_len) == FAILURE) {
+        RETURN_FALSE;
+    }
+
+    if (_beanstalk_client_get(object, &bs_client TSRMLS_CC) < 0) {
+        RETURN_FALSE;
+    }
+
+	command_len = spprintf(&command, 0, "use %s\r\n", tube);
+
+    if (beanstalk_client_write(bs_client, command, command_len TSRMLS_CC) < 0) {
+        efree(command);
+        RETURN_FALSE;
+    }
+    efree(command);
     
     if ((response = beanstalk_client_read(bs_client, &response_len TSRMLS_CC)) == NULL) {
         RETURN_FALSE;
