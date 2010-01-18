@@ -48,7 +48,7 @@ PHP_METHOD(Beanstalk, __construct);
 PHP_METHOD(Beanstalk, connect);
 PHP_METHOD(Beanstalk, close);
 PHP_METHOD(Beanstalk, put);
-PHP_METHOD(Beanstalk, use);
+PHP_METHOD(Beanstalk, useTube);
 
 typedef struct _beanstalk_client {
     php_stream     *stream;

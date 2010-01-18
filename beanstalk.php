@@ -12,9 +12,12 @@ catch (Exception $e) {
 	echo $e->getMessage() . "\n";
 }
 
-$res = $beanstalk->use('foo');
+$res = $beanstalk->useTube('foo');
+var_dump($res);
 
-$res = $beanstalk->put(0, 0, 120, 'say hello world');
+//$res = $beanstalk->put(0, 0, 120, 'say hello world');
+//var_dump($res);
+$res = $beanstalk->put(0, 0, 120, 'say hello');
 var_dump($res);
 
 $beanstalk->close();

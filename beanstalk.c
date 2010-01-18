@@ -42,7 +42,7 @@ const zend_function_entry beanstalk_functions[] = {
 	PHP_ME(Beanstalk, connect, NULL, ZEND_ACC_PUBLIC)
 	PHP_ME(Beanstalk, close, NULL, ZEND_ACC_PUBLIC)
 	PHP_ME(Beanstalk, put, NULL, ZEND_ACC_PUBLIC)
-	PHP_ME(Beanstalk, use, NULL, ZEND_ACC_PUBLIC)
+	PHP_ME(Beanstalk, useTube, NULL, ZEND_ACC_PUBLIC)
 	{NULL, NULL, NULL}	
 };
 
@@ -473,6 +473,55 @@ static char *beanstalk_client_read(beanstalk_client *bs_client, int *buf_len TSR
 */
 }
 
+static int beanstalk_str_left(char *haystack, int haystack_len, char *needle, int needle_len) /* {{{ */
+{
+	char *found;
+
+	found = php_memnstr(haystack, needle, needle_len, haystack + haystack_len);
+	if ((found - haystack) == 0) {
+		return 1;
+	}
+	return 0;
+}
+/* }}} */
+
+static int beanstalk_parse_response_error(char *response, int response_len TSRMLS_DC) /* {{{ */
+{
+    if(beanstalk_str_left(response, response_len, "OUT_OF_MEMORY", sizeof("OUT_OF_MEMORY") - 1)) {
+		return 0;
+	}
+	if(beanstalk_str_left(response, response_len, "INTERNAL_ERROR", sizeof("INTERNAL_ERROR") - 1)) {
+		return 0;
+	}
+	if(beanstalk_str_left(response, response_len, "DRAINING", sizeof("DRAINING") - 1)) {
+		return 0;
+	}
+	if(beanstalk_str_left(response, response_len, "BAD_FORMAT", sizeof("BAD_FORMAT") - 1)) {
+		return 0;
+	}
+	if(beanstalk_str_left(response, response_len, "UNKNOWN_COMMAND", sizeof("UNKNOWN_COMMAND") - 1)) {
+		return 0;
+	}
+	return 1;
+}
+
+static int beanstalk_parse_response_put(char *response, int response_len TSRMLS_DC) /* {{{ */
+{
+    if(beanstalk_str_left(response, response_len, "INSERTED", sizeof("INSERTED") - 1)) {
+		return 1;
+	}
+	if(beanstalk_str_left(response, response_len, "BURIED", sizeof("BURIED") - 1)) {
+		return 1;
+	}
+	if(beanstalk_str_left(response, response_len, "EXPECTED_CRLF", sizeof("EXPECTED_CRLF") - 1)) {
+		return 0;
+	}
+	if(beanstalk_str_left(response, response_len, "JOB_TOO_BIG", sizeof("JOB_TOO_BIG") - 1)) {
+		return 0;
+	}
+	return 0;
+}
+
 /* {{{ proto boolean Beanstalk::put(string key, string value)
  */
 PHP_METHOD(Beanstalk, put)
@@ -509,14 +558,20 @@ PHP_METHOD(Beanstalk, put)
         RETURN_FALSE;
     }
     printf("response: %s \n", response);
-    efree(response);
     
-    RETURN_TRUE;
+    if(beanstalk_parse_response_put(response, response_len TSRMLS_CC)) {
+		efree(response);
+		RETURN_TRUE;
+	}
+    
+    efree(response);
+    RETURN_FALSE;
+    
 }
 
-/* {{{ proto boolean Beanstalk::put(string key, string value)
+/* {{{ proto boolean Beanstalk::useTube(string tube)
  */
-PHP_METHOD(Beanstalk, use)
+PHP_METHOD(Beanstalk, useTube)
 {
     zval *object;
     beanstalk_client *bs_client = NULL;
