@@ -42,11 +42,9 @@ const zend_function_entry beanstalk_functions[] = {
 	PHP_ME(Beanstalk, connect, NULL, ZEND_ACC_PUBLIC)
 	PHP_ME(Beanstalk, close, NULL, ZEND_ACC_PUBLIC)
 	PHP_ME(Beanstalk, put, NULL, ZEND_ACC_PUBLIC)
-	PHP_ME(Beanstalk, useTube, NULL, ZEND_ACC_PUBLIC)
+	//PHP_ME(Beanstalk, useTube, NULL, ZEND_ACC_PUBLIC)
 	{NULL, NULL, NULL}	
 };
-
-static int beanstalk_client_disconnect(beanstalk_client *bs_client TSRMLS_DC);
 
 /* {{{ beanstalk_module_entry
  */
@@ -72,7 +70,7 @@ zend_module_entry beanstalk_module_entry = {
 ZEND_GET_MODULE(beanstalk)
 #endif
 
-static zend_class_entry *_beanstalk_get_exception_base(int root TSRMLS_DC)
+static zend_class_entry *beanstalk_get_exception_base(int root TSRMLS_DC) /* {{{ */
 {
 #if HAVE_SPL
 	if (!root) {
@@ -95,58 +93,6 @@ static zend_class_entry *_beanstalk_get_exception_base(int root TSRMLS_DC)
 	return zend_exception_get_default(TSRMLS_C);
 #endif
 }
-
-static void _beanstalk_client_free(beanstalk_client *bs_client) /* {{{ */
-{
-	efree(bs_client->host);
-	efree(bs_client);
-}
-/* }}} */
-
-static void _beanstalk_client_dtor(zend_rsrc_list_entry *rsrc TSRMLS_DC) /* {{{ */
-{
-	beanstalk_client *bs_client = (beanstalk_client *) rsrc->ptr;
-	beanstalk_client_disconnect(bs_client TSRMLS_CC);
-	_beanstalk_client_free(bs_client);
-}
-/* }}} */
-
-static int _beanstalk_client_get(zval *id, beanstalk_client **bs_client TSRMLS_DC)
-{
-    zval **conn;
-    int resource_type;
-
-    if (Z_TYPE_P(id) != IS_OBJECT || zend_hash_find(Z_OBJPROP_P(id), "connection",
-                                  sizeof("connection"), (void **) &conn) == FAILURE) {
-        return -1;
-    }
-
-    *bs_client = (beanstalk_client *) zend_list_find(Z_LVAL_PP(conn), &resource_type);
-
-    if (!*bs_client || resource_type != le_beanstalk_client) {
-            return -1;
-    }
-
-    return Z_LVAL_PP(conn);
-}
-
-static beanstalk_client* beanstalk_client_create(char *host, int host_len, unsigned short port, long timeout TSRMLS_DC) /* {{{ */
-{
-	beanstalk_client *bs_client;
-
-	bs_client		 = emalloc(sizeof(beanstalk_client));
-	bs_client->host   = emalloc(host_len + 1);
-	bs_client->stream = NULL;
-	bs_client->status = BEANSTALK_CLIENT_STATUS_DISCONNECTED;
-
-	memcpy(bs_client->host, host, host_len);
-	bs_client->host[host_len] = '\0';
-
-	bs_client->port	= port;
-	bs_client->timeout = timeout;
-
-	return bs_client;
-}
 /* }}} */
 
 static int beanstalk_client_disconnect(beanstalk_client *bs_client TSRMLS_DC) /* {{{ */
@@ -155,7 +101,6 @@ static int beanstalk_client_disconnect(beanstalk_client *bs_client TSRMLS_DC) /*
 
 	if (bs_client->stream != NULL) {
 		//redis_sock_write(redis_sock, "QUIT", sizeof("QUIT") - 1);
-
 		bs_client->status = BEANSTALK_CLIENT_STATUS_DISCONNECTED;
 		php_stream_close(bs_client->stream);
 		bs_client->stream = NULL;
@@ -164,6 +109,60 @@ static int beanstalk_client_disconnect(beanstalk_client *bs_client TSRMLS_DC) /*
 	}
 
 	return res;
+}
+/* }}} */
+
+static void beanstalk_client_free(beanstalk_client *bs_client) /* {{{ */
+{
+	efree(bs_client->host);
+	efree(bs_client);
+}
+/* }}} */
+
+static void beanstalk_client_dtor(zend_rsrc_list_entry *rsrc TSRMLS_DC) /* {{{ */
+{
+	beanstalk_client *bs_client = (beanstalk_client *) rsrc->ptr;
+	beanstalk_client_disconnect(bs_client TSRMLS_CC);
+	beanstalk_client_free(bs_client);
+}
+/* }}} */
+
+static int beanstalk_client_get(zval *id, beanstalk_client **bs_client TSRMLS_DC) /* {{{ */
+{
+	zval **conn;
+	int resource_type;
+
+	if (Z_TYPE_P(id) != IS_OBJECT || zend_hash_find(Z_OBJPROP_P(id), "connection",
+		sizeof("connection"), (void **) &conn) == FAILURE) {
+		return -1;
+	}
+
+	*bs_client = (beanstalk_client *) zend_list_find(Z_LVAL_PP(conn), &resource_type);
+
+	if (!*bs_client || resource_type != le_beanstalk_client) {
+			return -1;
+	}
+
+	return Z_LVAL_PP(conn);
+}
+/* }}} */
+
+static beanstalk_client* beanstalk_client_create(char *host, int host_len, unsigned short port, long timeout TSRMLS_DC) /* {{{ */
+{
+	beanstalk_client *bs_client;
+
+	bs_client			= emalloc(sizeof(beanstalk_client));
+	bs_client->host 	= emalloc(host_len + 1);
+	bs_client->stream 	= NULL;
+	bs_client->status 	= BEANSTALK_CLIENT_STATUS_DISCONNECTED;
+
+	memcpy(bs_client->host, host, host_len);
+	bs_client->host[host_len] = '\0';
+
+	bs_client->port	= port;
+	bs_client->timeout = timeout;
+
+	return bs_client;
 }
 /* }}} */
 
@@ -190,7 +189,6 @@ static int beanstalk_client_connect(beanstalk_client *bs_client TSRMLS_DC) /* {{
 		host, host_len, ENFORCE_SAFE_MODE, STREAM_XPORT_CLIENT | STREAM_XPORT_CONNECT,
 		hash_key, tv_ptr, NULL, &errstr, &err
 	);
-
 	efree(host);
 
 	if (!bs_client->stream) {
@@ -211,8 +209,6 @@ static int beanstalk_client_connect(beanstalk_client *bs_client TSRMLS_DC) /* {{
 	return 0;
 }
 /* }}} */
-
-
 
 static int beanstalk_client_open(beanstalk_client *bs_client, int force_connect TSRMLS_DC) /* {{{ */
 {
@@ -239,6 +235,251 @@ static int beanstalk_client_open(beanstalk_client *bs_client, int force_connect 
 	return res;
 }
 /* }}} */
+
+static void beanstalk_check_eof(beanstalk_client *bs_client TSRMLS_DC) /* {{{ */
+{
+	int eof = php_stream_eof(bs_client->stream);
+	while(eof) {
+		bs_client->stream = NULL;
+		beanstalk_client_connect(bs_client TSRMLS_CC);
+		eof = php_stream_eof(bs_client->stream);
+	}
+}
+/* }}} */
+
+static int beanstalk_client_write(beanstalk_client *bs_client, char *cmd, size_t sz TSRMLS_DC) /* {{{ */
+{
+	beanstalk_check_eof(bs_client TSRMLS_CC);
+	return php_stream_write(bs_client->stream, cmd, sz);
+}
+/* }}} */
+
+static char *beanstalk_client_read(beanstalk_client *bs_client, int *buf_len TSRMLS_DC) /* {{{ */
+{
+	char inbuf[1024];
+	char *resp = NULL;
+
+	beanstalk_check_eof(bs_client TSRMLS_CC);
+	php_stream_gets(bs_client->stream, inbuf, 1024);
+
+	*buf_len = strlen(inbuf) - 2;
+	if(*buf_len >= 2) {
+		resp = emalloc(1 + *buf_len);
+		memcpy(resp, inbuf, *buf_len);
+		resp[*buf_len] = 0;
+		return resp;
+	} else {
+		printf("protocol error \n");
+		return NULL;
+	}
+	
+}
+/* }}} */
+
+//~ 
+//~ static int beanstalk_str_left(char *haystack, int haystack_len, char *needle, int needle_len) /* {{{ */
+//~ {
+	//~ char *found;
+//~ 
+	//~ found = php_memnstr(haystack, needle, needle_len, haystack + haystack_len);
+	//~ if ((found - haystack) == 0) {
+		//~ return 1;
+	//~ }
+	//~ return 0;
+//~ }
+//~ /* }}} */
+//~ 
+//~ static int beanstalk_parse_response_error(char *response, int response_len TSRMLS_DC) /* {{{ */
+//~ {
+    //~ if(beanstalk_str_left(response, response_len, "OUT_OF_MEMORY", sizeof("OUT_OF_MEMORY") - 1)) {
+		//~ return 0;
+	//~ }
+	//~ if(beanstalk_str_left(response, response_len, "INTERNAL_ERROR", sizeof("INTERNAL_ERROR") - 1)) {
+		//~ return 0;
+	//~ }
+	//~ if(beanstalk_str_left(response, response_len, "DRAINING", sizeof("DRAINING") - 1)) {
+		//~ return 0;
+	//~ }
+	//~ if(beanstalk_str_left(response, response_len, "BAD_FORMAT", sizeof("BAD_FORMAT") - 1)) {
+		//~ return 0;
+	//~ }
+	//~ if(beanstalk_str_left(response, response_len, "UNKNOWN_COMMAND", sizeof("UNKNOWN_COMMAND") - 1)) {
+		//~ return 0;
+	//~ }
+	//~ return 1;
+//~ }
+//~ 
+//~ static int beanstalk_parse_response_put(char *response, int response_len TSRMLS_DC) /* {{{ */
+//~ {
+    //~ if(beanstalk_str_left(response, response_len, "INSERTED", sizeof("INSERTED") - 1)) {
+		//~ return 1;
+	//~ }
+	//~ if(beanstalk_str_left(response, response_len, "BURIED", sizeof("BURIED") - 1)) {
+		//~ return 1;
+	//~ }
+	//~ if(beanstalk_str_left(response, response_len, "EXPECTED_CRLF", sizeof("EXPECTED_CRLF") - 1)) {
+		//~ return 0;
+	//~ }
+	//~ if(beanstalk_str_left(response, response_len, "JOB_TOO_BIG", sizeof("JOB_TOO_BIG") - 1)) {
+		//~ return 0;
+	//~ }
+	//~ return 0;
+//~ }
+
+/* {{{ proto void Beanstalk::__construct() */
+PHP_METHOD(Beanstalk, __construct)
+{
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "") == FAILURE) {
+		RETURN_FALSE;
+	}
+}
+/* }}} */
+
+/* {{{ proto boolean Beanstalk::connect(string host, int port [, int timeout])
+ */
+PHP_METHOD(Beanstalk, connect)
+{
+	zval *object;
+	int host_len, id;
+	char *host = NULL;
+	long port;
+
+	struct timeval timeout = {0L, 0L};
+	beanstalk_client *bs_client = NULL;
+
+	if (zend_parse_method_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "Osl|l",
+		&object, beanstalk_ce, &host, &host_len, &port, &timeout.tv_sec) == FAILURE) {
+		RETURN_FALSE;
+	}
+
+	if (timeout.tv_sec < 0L || timeout.tv_sec > INT_MAX) {
+		zend_throw_exception(beanstalk_exception_ce, "Invalid timeout", 0 TSRMLS_CC);
+		RETURN_FALSE;
+	}
+
+	bs_client = beanstalk_client_create(host, host_len, port, timeout.tv_sec TSRMLS_CC);
+
+	if (beanstalk_client_open(bs_client, 1 TSRMLS_CC) < 0) {
+		beanstalk_client_free(bs_client);
+		zend_throw_exception_ex(
+			beanstalk_exception_ce, 0 TSRMLS_CC, "Can't connect to %s:%d", host, port
+		);
+		RETURN_FALSE;
+	}
+
+	id = zend_list_insert(bs_client, le_beanstalk_client);
+	add_property_resource(object, "connection", id);
+	
+	RETURN_TRUE;
+}
+/* }}} */
+
+/* {{{ proto boolean Beanstalk::close()
+ */
+PHP_METHOD(Beanstalk, close)
+{
+	zval *object;
+	beanstalk_client *bs_client = NULL;
+
+	if (zend_parse_method_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "O",
+		&object, beanstalk_ce) == FAILURE) {
+		RETURN_FALSE;
+	}
+
+	if (beanstalk_client_get(object, &bs_client TSRMLS_CC) < 0) {
+		RETURN_FALSE;
+	}
+
+	if (beanstalk_client_disconnect(bs_client TSRMLS_CC)) {
+		RETURN_TRUE;
+	}
+
+	RETURN_FALSE;
+}
+/* }}} */
+
+/* {{{ proto boolean Beanstalk::put(string key, string value)
+ */
+PHP_METHOD(Beanstalk, put)
+{
+	zval *object;
+	beanstalk_client *bs_client = NULL;
+	char *value = NULL, *command;
+	int value_len, command_len;
+	long priority, delay, ttr;
+	char *response;
+	int response_len;
+
+	if (zend_parse_method_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "Ollls",
+		&object, beanstalk_ce, &priority, &delay, &ttr, &value, &value_len) == FAILURE) {
+		RETURN_FALSE;
+	}
+
+	if (beanstalk_client_get(object, &bs_client TSRMLS_CC) < 0) {
+		RETURN_FALSE;
+	}
+
+	command_len = spprintf(&command, 0, "put %d %d %d %d\r\n%s\r\n", 
+							priority, delay, ttr, value_len, value);
+
+	if (beanstalk_client_write(bs_client, command, command_len TSRMLS_CC) < 0) {
+		efree(command);
+		RETURN_FALSE;
+	}
+	efree(command);
+	//beanstalk_boolean_response(INTERNAL_FUNCTION_PARAM_PASSTHRU, bs_client);
+
+	if ((response = beanstalk_client_read(bs_client, &response_len TSRMLS_CC)) == NULL) {
+		RETURN_FALSE;
+	}
+	printf("response: %s \n", response);
+
+	//~ if(beanstalk_parse_response_put(response, response_len TSRMLS_CC)) {
+		//~ efree(response);
+		//~ RETURN_TRUE;
+	//~ }
+
+	efree(response);
+	RETURN_FALSE;
+}
+/* }}} */
+
+//~ /* {{{ proto boolean Beanstalk::useTube(string tube)
+ //~ */
+//~ PHP_METHOD(Beanstalk, useTube)
+//~ {
+    //~ zval *object;
+    //~ beanstalk_client *bs_client = NULL;
+    //~ char *tube = NULL, *command;
+    //~ int tube_len, command_len;
+    //~ char *response;
+    //~ int response_len;
+//~ 
+    //~ if (zend_parse_method_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "Os",
+                                     //~ &object, beanstalk_ce, &tube, &tube_len) == FAILURE) {
+        //~ RETURN_FALSE;
+    //~ }
+//~ 
+    //~ if (_beanstalk_client_get(object, &bs_client TSRMLS_CC) < 0) {
+        //~ RETURN_FALSE;
+    //~ }
+//~ 
+	//~ command_len = spprintf(&command, 0, "use %s\r\n", tube);
+//~ 
+    //~ if (beanstalk_client_write(bs_client, command, command_len TSRMLS_CC) < 0) {
+        //~ efree(command);
+        //~ RETURN_FALSE;
+    //~ }
+    //~ efree(command);
+    //~ 
+    //~ if ((response = beanstalk_client_read(bs_client, &response_len TSRMLS_CC)) == NULL) {
+        //~ RETURN_FALSE;
+    //~ }
+    //~ printf("response: %s \n", response);
+    //~ efree(response);
+    //~ 
+    //~ RETURN_TRUE;
+//~ }
 
 /* {{{ PHP_INI
  */
@@ -270,15 +511,15 @@ PHP_MINIT_FUNCTION(beanstalk)
 	beanstalk_ce = zend_register_internal_class(&ce TSRMLS_CC);
 	
 	zend_class_entry exception_ce;
-    INIT_CLASS_ENTRY(exception_ce, "BeanstalkException", NULL);
-    beanstalk_exception_ce = zend_register_internal_class_ex(
-        &exception_ce,
-        _beanstalk_get_exception_base(0 TSRMLS_CC),
-        NULL TSRMLS_CC
-    );
+	INIT_CLASS_ENTRY(exception_ce, "BeanstalkException", NULL);
+	beanstalk_exception_ce = zend_register_internal_class_ex(
+		&exception_ce,
+		beanstalk_get_exception_base(0 TSRMLS_CC),
+		NULL TSRMLS_CC
+	);
 	
 	le_beanstalk_client = zend_register_list_destructors_ex(
-		_beanstalk_client_dtor, NULL, "Beanstalk client", module_number
+		beanstalk_client_dtor, NULL, "Beanstalk client", module_number
 	);
 	
 	return SUCCESS;
@@ -328,283 +569,7 @@ PHP_MINFO_FUNCTION(beanstalk)
 }
 /* }}} */
 
-/* {{{ proto void Beanstalk::__construct() */
-PHP_METHOD(Beanstalk, __construct)
-{
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "") == FAILURE) {
-		RETURN_FALSE;
-	}
-}
-/* }}} */
 
-/* {{{ proto boolean Beanstalk::connect(string host, int port [, int timeout])
- */
-PHP_METHOD(Beanstalk, connect)
-{
-	zval *object;
-	int host_len, id;
-	char *host = NULL;
-	long port;
-
-	struct timeval timeout = {0L, 0L};
-	beanstalk_client *bs_client = NULL;
-
-	if (zend_parse_method_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "Osl|l",
-									 &object, beanstalk_ce, &host, &host_len, &port,
-									 &timeout.tv_sec) == FAILURE) {
-	   RETURN_FALSE;
-	}
-
-	if (timeout.tv_sec < 0L || timeout.tv_sec > INT_MAX) {
-		zend_throw_exception(beanstalk_exception_ce, "Invalid timeout", 0 TSRMLS_CC);
-		RETURN_FALSE;
-	}
-
-	bs_client = beanstalk_client_create(host, host_len, port, timeout.tv_sec TSRMLS_CC);
-
-	if (beanstalk_client_open(bs_client, 1 TSRMLS_CC) < 0) {
-		_beanstalk_client_free(bs_client);
-		zend_throw_exception_ex(
-			beanstalk_exception_ce, 0 TSRMLS_CC, "Can't connect to %s:%d", host, port
-		);
-		RETURN_FALSE;
-	}
-	
-	id = zend_list_insert(bs_client, le_beanstalk_client);
-	add_property_resource(object, "connection", id);
-	
-	RETURN_TRUE;
-}
-/* }}} */
-
-/* {{{ proto boolean Beanstalk::close()
- */
-PHP_METHOD(Beanstalk, close)
-{
-    zval *object;
-    beanstalk_client *bs_client = NULL;
-
-    if (zend_parse_method_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "O",
-        &object, beanstalk_ce) == FAILURE) {
-        RETURN_FALSE;
-    }
-
-    if (_beanstalk_client_get(object, &bs_client TSRMLS_CC) < 0) {
-        RETURN_FALSE;
-    }
-
-    if (beanstalk_client_disconnect(bs_client TSRMLS_CC)) {
-        RETURN_TRUE;
-    }
-
-    RETURN_FALSE;
-}
-
-
-
-static void beanstalk_check_eof(beanstalk_client *bs_client TSRMLS_DC) {
-    int eof = php_stream_eof(bs_client->stream);
-    while(eof) {
-        bs_client->stream = NULL;
-        beanstalk_client_connect(bs_client TSRMLS_CC);
-        eof = php_stream_eof(bs_client->stream);
-    }
-}
-
-static int beanstalk_client_write(beanstalk_client *bs_client, char *cmd, size_t sz TSRMLS_DC)
-{
-    beanstalk_check_eof(bs_client TSRMLS_CC);
-    return php_stream_write(bs_client->stream, cmd, sz);
-
-    return 0;
-}
-
-static char *beanstalk_client_read(beanstalk_client *bs_client, int *buf_len TSRMLS_DC)
-{
-
-    char inbuf[1024];
-    char *resp = NULL;
-
-    beanstalk_check_eof(bs_client TSRMLS_CC);
-    php_stream_gets(bs_client->stream, inbuf, 1024);
-	
-	*buf_len = strlen(inbuf) - 2;
-	if(*buf_len >= 2) {
-		resp = emalloc(1+*buf_len);
-		memcpy(resp, inbuf, *buf_len);
-		resp[*buf_len] = 0;
-		return resp;
-	} else {
-		printf("protocol error \n");
-		return NULL;
-	}
-	
-/*
-    switch(inbuf[0]) {
-
-        case '-':
-            return NULL;
-
-        case '+':
-        case ':':    
-            // Single Line Reply 
-            / :123\r\n /
-            *buf_len = strlen(inbuf) - 2;
-            if(*buf_len >= 2) {
-                resp = emalloc(1+*buf_len);
-                memcpy(resp, inbuf, *buf_len);
-                resp[*buf_len] = 0;
-                return resp;
-            } else {
-                printf("protocol error \n");
-                return NULL;
-            }
-
-        case '$':
-            *buf_len = atoi(inbuf + 1);
-            resp = redis_sock_read_bulk_reply(redis_sock, *buf_len);
-            return resp;
-
-        default:
-            printf("protocol error, got '%c' as reply type byte\n", inbuf[0]);
-    }
-
-    return NULL;
-*/
-}
-
-static int beanstalk_str_left(char *haystack, int haystack_len, char *needle, int needle_len) /* {{{ */
-{
-	char *found;
-
-	found = php_memnstr(haystack, needle, needle_len, haystack + haystack_len);
-	if ((found - haystack) == 0) {
-		return 1;
-	}
-	return 0;
-}
-/* }}} */
-
-static int beanstalk_parse_response_error(char *response, int response_len TSRMLS_DC) /* {{{ */
-{
-    if(beanstalk_str_left(response, response_len, "OUT_OF_MEMORY", sizeof("OUT_OF_MEMORY") - 1)) {
-		return 0;
-	}
-	if(beanstalk_str_left(response, response_len, "INTERNAL_ERROR", sizeof("INTERNAL_ERROR") - 1)) {
-		return 0;
-	}
-	if(beanstalk_str_left(response, response_len, "DRAINING", sizeof("DRAINING") - 1)) {
-		return 0;
-	}
-	if(beanstalk_str_left(response, response_len, "BAD_FORMAT", sizeof("BAD_FORMAT") - 1)) {
-		return 0;
-	}
-	if(beanstalk_str_left(response, response_len, "UNKNOWN_COMMAND", sizeof("UNKNOWN_COMMAND") - 1)) {
-		return 0;
-	}
-	return 1;
-}
-
-static int beanstalk_parse_response_put(char *response, int response_len TSRMLS_DC) /* {{{ */
-{
-    if(beanstalk_str_left(response, response_len, "INSERTED", sizeof("INSERTED") - 1)) {
-		return 1;
-	}
-	if(beanstalk_str_left(response, response_len, "BURIED", sizeof("BURIED") - 1)) {
-		return 1;
-	}
-	if(beanstalk_str_left(response, response_len, "EXPECTED_CRLF", sizeof("EXPECTED_CRLF") - 1)) {
-		return 0;
-	}
-	if(beanstalk_str_left(response, response_len, "JOB_TOO_BIG", sizeof("JOB_TOO_BIG") - 1)) {
-		return 0;
-	}
-	return 0;
-}
-
-/* {{{ proto boolean Beanstalk::put(string key, string value)
- */
-PHP_METHOD(Beanstalk, put)
-{
-    zval *object;
-    beanstalk_client *bs_client = NULL;
-    char *value = NULL, *command;
-    int value_len, command_len;
-    long priority, delay, ttr;
-    char *response;
-    int response_len;
-
-    if (zend_parse_method_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "Ollls",
-                                     &object, beanstalk_ce, &priority, &delay, &ttr,
-                                     &value, &value_len) == FAILURE) {
-        RETURN_FALSE;
-    }
-
-    if (_beanstalk_client_get(object, &bs_client TSRMLS_CC) < 0) {
-        RETURN_FALSE;
-    }
-
-	command_len = spprintf(&command, 0, "put %d %d %d %d\r\n%s\r\n", 
-							priority, delay, ttr, value_len, value);
-
-    if (beanstalk_client_write(bs_client, command, command_len TSRMLS_CC) < 0) {
-        efree(command);
-        RETURN_FALSE;
-    }
-    efree(command);
-    //beanstalk_boolean_response(INTERNAL_FUNCTION_PARAM_PASSTHRU, bs_client);
-    
-    if ((response = beanstalk_client_read(bs_client, &response_len TSRMLS_CC)) == NULL) {
-        RETURN_FALSE;
-    }
-    printf("response: %s \n", response);
-    
-    if(beanstalk_parse_response_put(response, response_len TSRMLS_CC)) {
-		efree(response);
-		RETURN_TRUE;
-	}
-    
-    efree(response);
-    RETURN_FALSE;
-    
-}
-
-/* {{{ proto boolean Beanstalk::useTube(string tube)
- */
-PHP_METHOD(Beanstalk, useTube)
-{
-    zval *object;
-    beanstalk_client *bs_client = NULL;
-    char *tube = NULL, *command;
-    int tube_len, command_len;
-    char *response;
-    int response_len;
-
-    if (zend_parse_method_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "Os",
-                                     &object, beanstalk_ce, &tube, &tube_len) == FAILURE) {
-        RETURN_FALSE;
-    }
-
-    if (_beanstalk_client_get(object, &bs_client TSRMLS_CC) < 0) {
-        RETURN_FALSE;
-    }
-
-	command_len = spprintf(&command, 0, "use %s\r\n", tube);
-
-    if (beanstalk_client_write(bs_client, command, command_len TSRMLS_CC) < 0) {
-        efree(command);
-        RETURN_FALSE;
-    }
-    efree(command);
-    
-    if ((response = beanstalk_client_read(bs_client, &response_len TSRMLS_CC)) == NULL) {
-        RETURN_FALSE;
-    }
-    printf("response: %s \n", response);
-    efree(response);
-    
-    RETURN_TRUE;
-}
 
 /*
  * Local variables:
